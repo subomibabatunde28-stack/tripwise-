@@ -672,7 +672,7 @@ export default function RecommendationsPage() {
                               imageUrl: imageSource || "",
                             })
                           }
-                          className="w-full rounded-xl bg-[#D6A85F] px-5 py-3.5 text-sm font-bold text-[#103B2C] transition hover:bg-[#E7C58D]"
+                          className="w-full rounded-xl bg-[#D6A85F] cursor-pointer px-5 py-3.5 text-sm font-bold text-[#103B2C] transition hover:bg-[#E7C58D]"
                         >
                           Add to My Trip
                         </button>

@@ -1,6 +1,7 @@
 
 "use client";
 
+import { useState } from "react";
 import { useTrip } from "@/app/context/TripContext";
 
 function formatNaira(amount: number) {
@@ -22,6 +23,22 @@ export default function MyTripsPage() {
     isLoadingTrip,
     saveStatus,
   } = useTrip();
+
+  // Tracks whether the trip is currently being saved.
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Handles saving and prevents repeated clicks.
+  async function handleSaveTrip() {
+    if (isSaving) return;
+
+    setIsSaving(true);
+
+    try {
+      await saveTrip();
+    } finally {
+      setIsSaving(false);
+    }
+  }
 
   const totalCost = days.reduce(
     (total, day) =>
@@ -182,18 +199,25 @@ export default function MyTripsPage() {
             </div>
           </div>
 
-          {/* Save */}
+          {/* Save Trip */}
           <div className="mt-8 flex flex-col gap-4 border-t border-gray-100 pt-6 sm:flex-row sm:items-center">
             <button
               type="button"
-              onClick={saveTrip}
-              className="rounded-xl bg-green-800 px-7 py-3.5 text-sm font-bold text-white shadow-lg shadow-green-900/10 transition hover:-translate-y-0.5 hover:bg-green-900"
+              onClick={handleSaveTrip}
+              disabled={isSaving}
+              className={`rounded-xl px-7 py-3.5 text-sm font-bold text-white shadow-lg transition ${
+                isSaving
+                  ? "cursor-not-allowed bg-gray-400"
+                  : "cursor-pointer bg-green-800 shadow-green-900/10 hover:-translate-y-0.5 hover:bg-green-900"
+              }`}
             >
-              Save My Trip
+              {isSaving ? "Saving your trip..." : "Save My Trip"}
             </button>
 
             {saveStatus && (
               <p
+                role="status"
+                aria-live="polite"
                 className={`text-sm font-medium ${
                   saveStatus.includes("successfully")
                     ? "text-green-700"
