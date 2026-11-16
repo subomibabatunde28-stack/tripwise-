@@ -16,6 +16,7 @@ interface Attraction {
   distance?: number;
   imageUrl?: string;
   imageUrls?: string;
+  estimatedCost?: number;
 }
 
 interface DiscoveryResponse {
@@ -47,6 +48,14 @@ const CATEGORIES = [
 const normalizeDestinationName = (name: string) =>
   name.toLowerCase().trim().replace(/[^a-z0-9]/g, "");
 
+function formatNaira(amount: number) {
+  return new Intl.NumberFormat("en-NG", {
+    style: "currency",
+    currency: "NGN",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
 function getDestinationCategory(place: Attraction): string {
   const existingCategory = place.category?.trim().toLowerCase();
 
@@ -59,27 +68,18 @@ function getDestinationCategory(place: Attraction): string {
   ];
 
   if (existingCategory && knownCategories.includes(existingCategory)) {
-    return (
-      existingCategory.charAt(0).toUpperCase() +
-      existingCategory.slice(1)
-    );
+    return existingCategory.charAt(0).toUpperCase() + existingCategory.slice(1);
   }
 
   const name = place.name.toLowerCase();
   const description = (place.description || "").toLowerCase();
   const text = `${name} ${description}`;
 
-  if (
-    /gberefu|slave route|point of no return|slave trade|slave history/.test(
-      text
-    )
-  ) {
+  if (/gberefu|slave route|point of no return|slave trade|slave history/.test(text)) {
     return "History";
   }
 
-  if (
-    /zoo|wildlife|animal|safari|game reserve|national park/.test(text)
-  ) {
+  if (/zoo|wildlife|animal|safari|game reserve|national park/.test(text)) {
     return "Wildlife";
   }
 
@@ -87,27 +87,15 @@ function getDestinationCategory(place: Attraction): string {
     return "Beach";
   }
 
-  if (
-    /museum|monument|heritage|historic|history|palace|castle|ancient|memorial/.test(
-      text
-    )
-  ) {
+  if (/museum|monument|heritage|historic|history|palace|castle|ancient|memorial/.test(text)) {
     return "History";
   }
 
-  if (
-    /festival|traditional|cultural|culture|art gallery|craft|shrine|heritage site/.test(
-      text
-    )
-  ) {
+  if (/festival|traditional|cultural|culture|art gallery|craft|shrine|heritage site/.test(text)) {
     return "Culture";
   }
 
-  if (
-    /waterfall|falls|forest|garden|mountain|hill|rock|spring|lake|cave|river|valley|landscape|nature/.test(
-      text
-    )
-  ) {
+  if (/waterfall|falls|forest|garden|mountain|hill|rock|spring|lake|cave|river|valley|landscape|nature/.test(text)) {
     return "Nature";
   }
 
@@ -117,21 +105,22 @@ function getDestinationCategory(place: Attraction): string {
 const SPECIAL_IMAGE_OVERRIDES: Record<string, string | null> = {
   ijedespring:
     "https://i0.wp.com/www.theimpactnewspaper.com/wp-content/uploads/2021/04/IMG_1528-scaled.jpg?fit=2560%2C1920&ssl=1",
-
   binafootprint:
     "https://www.nigeriagalleria.com/Nigeria/States_Nigeria/Niger/Images/Bina-Footprints-Niger.jpeg",
-
   tangalepeakhill:
     "https://celebrityplatform.wordpress.com/wp-content/uploads/2019/07/img_20190602_165319.jpg",
-
   killanghill:
     "https://commons.wikimedia.org/wiki/Special:FilePath/Kilang_Hill.jpg",
-
   kilanghill:
     "https://commons.wikimedia.org/wiki/Special:FilePath/Kilang_Hill.jpg",
-
   pankilanghill:
     "https://celebrityplatform.wordpress.com/wp-content/uploads/2019/07/img_20190602_165319.jpg",
+};
+
+// Alternative names for matching existing destination records.
+const DESTINATION_ALIASES: Record<string, string[]> = {
+  joswildlifepark: ["joszoo"],
+  joszoo: ["joswildlifepark"],
 };
 
 export default function RecommendationsPage() {
@@ -160,9 +149,7 @@ export default function RecommendationsPage() {
       const response = await fetch(url);
 
       if (!response.ok) {
-        throw new Error(
-          "Unable to discover attractions. Please try again."
-        );
+        throw new Error("Unable to discover attractions. Please try again.");
       }
 
       const data: DiscoveryResponse = await response.json();
@@ -193,27 +180,46 @@ export default function RecommendationsPage() {
         enrichedResults = uniqueResults.map((place) => {
           const key = normalizeDestinationName(place.name);
 
+          const possibleNames = [
+            key,
+            ...(DESTINATION_ALIASES[key] || []),
+          ];
+
+          const matchingDestination = firebaseDestinations.find(
+            (destination) => {
+              const destinationKey = normalizeDestinationName(destination.name);
+
+              return (
+                possibleNames.includes(destinationKey) ||
+                (DESTINATION_ALIASES[destinationKey] || []).includes(key)
+              );
+            }
+          );
+
+          const rawEstimatedCost = Number(
+            matchingDestination?.estimatedCost
+          );
+
           const hasSpecialOverride =
             Object.prototype.hasOwnProperty.call(
               SPECIAL_IMAGE_OVERRIDES,
               key
             );
 
-          const matchingDestination = firebaseDestinations.find(
-            (destination) =>
-              normalizeDestinationName(destination.name) === key
-          );
-
           return {
             ...place,
             imageUrl: hasSpecialOverride
               ? SPECIAL_IMAGE_OVERRIDES[key] || ""
               : matchingDestination?.imageUrl || "",
+            estimatedCost:
+              Number.isFinite(rawEstimatedCost) && rawEstimatedCost > 0
+                ? rawEstimatedCost
+                : 0,
           };
         });
       } catch (firebaseError) {
         console.error(
-          "Could not load Firestore images:",
+          "Could not load destination cost information:",
           firebaseError
         );
       }
@@ -265,7 +271,6 @@ export default function RecommendationsPage() {
   const filteredAttractions = useMemo(() => {
     return attractions.filter((place) => {
       if (category === "All") return true;
-
       return getDestinationCategory(place) === category;
     });
   }, [attractions, category]);
@@ -338,11 +343,7 @@ export default function RecommendationsPage() {
 
               return { id: place.id, image: null };
             } catch (err) {
-              console.error(
-                `Could not load image for ${place.name}:`,
-                err
-              );
-
+              console.error(`Could not load image for ${place.name}:`, err);
               return { id: place.id, image: null };
             }
           })
@@ -381,7 +382,6 @@ export default function RecommendationsPage() {
 
   return (
     <main className="min-h-screen bg-[#FFF9EF]">
-      {/* Hero section */}
       <section className="relative overflow-hidden bg-[#103B2C] px-6 py-20 text-white md:py-28">
         <div className="absolute -right-24 -top-24 h-80 w-80 rounded-full bg-[#D6A85F]/10 blur-3xl" />
         <div className="absolute -bottom-32 -left-20 h-80 w-80 rounded-full bg-white/5 blur-3xl" />
@@ -395,9 +395,7 @@ export default function RecommendationsPage() {
             <h1 className="mb-6 text-4xl font-bold leading-tight tracking-tight md:text-6xl">
               Discover Nigeria.
               <br />
-              <span className="text-[#D6A85F]">
-                Experience More.
-              </span>
+              <span className="text-[#D6A85F]">Experience More.</span>
             </h1>
 
             <p className="max-w-2xl text-base leading-8 text-white/75 md:text-lg">
@@ -417,14 +415,12 @@ export default function RecommendationsPage() {
         </div>
       </section>
 
-      {/* Search section */}
       <section className="relative z-10 mx-auto -mt-8 max-w-7xl px-6">
         <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-xl md:p-7">
           <div className="mb-4">
             <h2 className="text-xl font-bold text-[#103B2C]">
               Where would you like to explore?
             </h2>
-
             <p className="mt-1 text-sm text-gray-500">
               Search for tourist attractions by state or city.
             </p>
@@ -482,7 +478,6 @@ export default function RecommendationsPage() {
         </div>
       </section>
 
-      {/* Destination results */}
       <section className="mx-auto max-w-7xl px-6 py-16">
         <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
           <div>
@@ -511,7 +506,6 @@ export default function RecommendationsPage() {
           </div>
         </div>
 
-        {/* Category filters */}
         <div className="mb-10">
           <p className="mb-4 text-sm font-semibold text-gray-700">
             Explore by interest
@@ -534,30 +528,24 @@ export default function RecommendationsPage() {
           </div>
         </div>
 
-        {/* Loading state */}
         {loading && (
           <div className="rounded-2xl bg-white py-24 text-center shadow-sm">
             <div className="mx-auto mb-5 h-12 w-12 animate-spin rounded-full border-4 border-[#E5EDE4] border-t-[#103B2C]" />
-
             <h3 className="text-lg font-bold text-[#103B2C]">
               Finding beautiful places...
             </h3>
-
             <p className="mt-2 text-sm text-gray-500">
               Please wait while we explore destinations across Nigeria.
             </p>
           </div>
         )}
 
-        {/* Error state */}
         {!loading && error && (
           <div className="rounded-2xl border border-red-100 bg-white p-10 text-center shadow-sm">
             <h3 className="mb-3 text-xl font-bold text-gray-900">
               We couldn't load the destinations
             </h3>
-
             <p className="mb-6 text-sm text-gray-500">{error}</p>
-
             <button
               onClick={() => discoverAttractions()}
               className="rounded-xl bg-[#103B2C] px-7 py-3 font-semibold text-white transition hover:bg-[#18533D]"
@@ -567,13 +555,10 @@ export default function RecommendationsPage() {
           </div>
         )}
 
-        {/* Destination cards */}
         {!loading && !error && filteredAttractions.length > 0 && (
           <div className="grid grid-cols-1 gap-7 sm:grid-cols-2 lg:grid-cols-3">
             {filteredAttractions.map((place) => {
-              const imageSource =
-                place.imageUrl || imageUrls[place.id];
-
+              const imageSource = place.imageUrl || imageUrls[place.id];
               const hasImage = Boolean(imageSource);
               const imageFailed = failedImages.includes(place.id);
 
@@ -587,6 +572,11 @@ export default function RecommendationsPage() {
                   (activity) => activity.destinationId === place.id
                 )
               );
+
+              const hasCost =
+                typeof place.estimatedCost === "number" &&
+                Number.isFinite(place.estimatedCost) &&
+                place.estimatedCost > 0;
 
               return (
                 <article
@@ -612,7 +602,6 @@ export default function RecommendationsPage() {
                       <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#EAF0E7] to-[#D5E3D2]">
                         <div className="text-center text-[#103B2C]">
                           <span className="text-4xl">📍</span>
-
                           <p className="mt-3 text-sm font-medium">
                             {imageFailed
                               ? "Photograph unavailable"
@@ -646,6 +635,8 @@ export default function RecommendationsPage() {
                         `Discover ${place.name}, a place worth exploring in Nigeria.`}
                     </p>
 
+                    
+
                     {typeof place.distance === "number" && (
                       <p className="mb-4 text-xs font-medium text-gray-400">
                         Approximately {place.distance.toFixed(1)} km away
@@ -667,9 +658,13 @@ export default function RecommendationsPage() {
                             addDestination({
                               id: place.id,
                               name: place.name,
-                              state: place.state || place.location || activeLocation,
+                              state:
+                                place.state ||
+                                place.location ||
+                                activeLocation,
                               description: place.description || "",
                               imageUrl: imageSource || "",
+                              cost: hasCost ? place.estimatedCost! : 0,
                             })
                           }
                           className="w-full rounded-xl bg-[#D6A85F] px-5 py-3.5 text-sm font-bold text-[#103B2C] transition hover:bg-[#E7C58D]"
@@ -689,14 +684,12 @@ export default function RecommendationsPage() {
                             category: displayCategory,
                             location: placeLocation,
                             image: imageSource || "",
-                            distance:
-                              place.distance?.toString() || "",
+                            distance: place.distance?.toString() || "",
                           },
                         }}
                         className="flex w-full items-center justify-between rounded-xl bg-[#F0F5ED] px-5 py-3.5 text-sm font-bold text-[#103B2C] transition hover:bg-[#103B2C] hover:text-white"
                       >
-                        <span>Explore destination</span>
-
+                        <span>Destination details</span>
                         <span className="text-lg transition group-hover:translate-x-1">
                           →
                         </span>
@@ -709,7 +702,6 @@ export default function RecommendationsPage() {
           </div>
         )}
 
-        {/* Empty state */}
         {!loading && !error && filteredAttractions.length === 0 && (
           <div className="rounded-2xl border border-gray-100 bg-white px-6 py-20 text-center shadow-sm">
             <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-[#F0F5ED] text-3xl">
@@ -739,7 +731,6 @@ export default function RecommendationsPage() {
         )}
       </section>
 
-      {/* Closing banner */}
       <section className="px-6 pb-16">
         <div className="mx-auto max-w-7xl overflow-hidden rounded-3xl bg-[#103B2C] px-8 py-12 text-center md:px-16 md:py-16">
           <p className="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-[#D6A85F]">

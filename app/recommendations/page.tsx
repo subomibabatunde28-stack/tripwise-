@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   getDestinations,
   type Destination,
@@ -132,6 +133,7 @@ function formatNaira(amount: number) {
 }
 
 export default function RecommendationsPage() {
+  const router = useRouter();
   const { addDestination } = useTrip();
 
   const [addedDestinationIds, setAddedDestinationIds] = useState<string[]>([]);
@@ -785,6 +787,8 @@ export default function RecommendationsPage() {
                                 ? current
                                 : [...current, place.id]
                             );
+
+                            router.push("/my-trips");
                           }}
                           disabled={addedDestinationIds.includes(place.id)}
                           className={`mt-5 w-full rounded-xl px-4 py-3.5 text-sm font-bold transition ${

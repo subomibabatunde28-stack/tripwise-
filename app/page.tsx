@@ -109,7 +109,7 @@ export default function Home() {
                 href="/destinations"
                 className="rounded-xl bg-green-500 px-8 py-4 text-center font-bold text-white shadow-lg transition duration-300 hover:-translate-y-1 hover:bg-green-400"
               >
-                Explore destinations →
+                Destination details →
               </Link>
 
               <Link
