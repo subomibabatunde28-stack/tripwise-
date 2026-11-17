@@ -133,10 +133,11 @@ function formatNaira(amount: number) {
 }
 
 export default function RecommendationsPage() {
+
   const router = useRouter();
   const { addDestination } = useTrip();
 
-  const [addedDestinationIds, setAddedDestinationIds] = useState<string[]>([]);
+
   const [destinations, setDestinations] = useState<Destination[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -669,6 +670,12 @@ export default function RecommendationsPage() {
                   const imageUrl =
                     savedImage || searchedImage?.imageUrl || null;
 
+                  const isAdded = days.some((day) =>
+                    day.activities.some(
+                      (activity) => activity.destinationId === place.id
+                    )
+                  );
+
                   return (
                     <article
                       key={place.id}
@@ -782,6 +789,8 @@ export default function RecommendationsPage() {
                               cost: item.validCost ? item.cost : 0,
                             });
 
+
+
                             setAddedDestinationIds((current) =>
                               current.includes(place.id)
                                 ? current
@@ -789,15 +798,16 @@ export default function RecommendationsPage() {
                             );
 
                             router.push("/my-trips");
+
                           }}
-                          disabled={addedDestinationIds.includes(place.id)}
+                          disabled={isAdded}
                           className={`mt-5 w-full rounded-xl px-4 py-3.5 text-sm font-bold transition ${
-                            addedDestinationIds.includes(place.id)
+                            isAdded
                               ? "cursor-not-allowed bg-gray-100 text-gray-500"
-                              : "bg-green-800 text-white hover:bg-green-900"
+                              : "cursor-pointer bg-green-800 text-white hover:bg-green-900"
                           }`}
                         >
-                          {addedDestinationIds.includes(place.id)
+                          {isAdded
                             ? "✓ Added to My Trip"
                             : "+ Add to My Trip"}
                         </button>

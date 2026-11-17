@@ -7,6 +7,7 @@ import {
   type ExpenseCategory,
 } from "@/app/context/TripContext";
 
+
 function formatNaira(amount: number) {
   return new Intl.NumberFormat("en-NG", {
     style: "currency",
@@ -90,6 +91,7 @@ export default function MyTripsPage() {
     saveStatus,
   } = useTrip();
 
+
   const [expenseTitle, setExpenseTitle] = useState("");
   const [expenseAmount, setExpenseAmount] = useState("");
   const [expenseCategory, setExpenseCategory] =
@@ -104,6 +106,7 @@ export default function MyTripsPage() {
   );
 
   const activityCost = days.reduce(
+
     (total, day) =>
       total +
       day.activities.reduce(
@@ -889,6 +892,7 @@ export default function MyTripsPage() {
               </p>
             </div>
 
+
             <button
               type="button"
               onClick={handleSaveTrip}
@@ -897,6 +901,7 @@ export default function MyTripsPage() {
             >
               {saving ? "Saving..." : "Save My Trip"}
             </button>
+
           </div>
 
           {saveStatus && (
