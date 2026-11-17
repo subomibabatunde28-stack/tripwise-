@@ -5,6 +5,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -72,7 +73,6 @@ export type TripDetails = {
   departure: string;
   duration: string;
   budget: number;
-
   transportCost?: number;
   accommodationName?: string;
   accommodationNights?: number;
@@ -89,6 +89,22 @@ export type SavedTrip = {
   updatedAt?: string;
 };
 
+type DestinationInput = {
+  id: string;
+  name: string;
+  state: string;
+  description?: string;
+  imageUrl?: string;
+  cost?: number;
+};
+
+type CurrentTripData = {
+  trip: TripDetails;
+  days: TripDay[];
+  expenses: TripExpense[];
+  activeTripId: string | null;
+};
+
 type TripContextType = {
   trip: TripDetails;
   days: TripDay[];
@@ -97,14 +113,7 @@ type TripContextType = {
   savedTrips: SavedTrip[];
   activeTripId: string | null;
 
-  addDestination: (destination: {
-    id: string;
-    name: string;
-    state: string;
-    description?: string;
-    imageUrl?: string;
-    cost?: number;
-  }) => void;
+  addDestination: (destination: DestinationInput) => Promise<boolean>;
 
   addActivity: (dayId: string, activity: TripActivity) => void;
   removeActivity: (dayId: string, activityId: string) => void;
@@ -112,7 +121,10 @@ type TripContextType = {
   updateTrip: (details: Partial<TripDetails>) => void;
 
   addExpense: (expense: TripExpense) => void;
-  updateExpense: (expenseId: string, updates: Partial<TripExpense>) => void;
+  updateExpense: (
+    expenseId: string,
+    updates: Partial<TripExpense>
+  ) => void;
   removeExpense: (expenseId: string) => void;
 
   saveTrip: () => Promise<boolean>;
@@ -165,6 +177,18 @@ const createId = () => {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 };
 
+const getDestinationStates = (days: TripDay[]) => {
+  return Array.from(
+    new Set(
+      days
+        .flatMap((day) => day.activities)
+        .filter((activity) => activity.destinationId)
+        .map((activity) => activity.state)
+        .filter(Boolean)
+    )
+  ).join(", ");
+};
+
 const normalizeExpense = (
   raw: any,
   index: number
@@ -180,7 +204,9 @@ const normalizeExpense = (
             .replace(/[^\d.-]/g, "")
         ) || 0;
 
-  const rawCategory = String(raw?.category ?? "Other").toLowerCase();
+  const rawCategory = String(
+    raw?.category ?? "Other"
+  ).toLowerCase();
 
   let category: ExpenseCategory = "Other";
 
@@ -242,6 +268,10 @@ const normalizeSavedTrip = (
           ? day.activities.map((activity: any) => ({
               ...activity,
               id: String(activity?.id ?? createId()),
+              title: String(activity?.title ?? "Untitled activity"),
+              state: String(activity?.state ?? ""),
+              time: String(activity?.time ?? "09:00"),
+              type: activity?.type ?? "Attraction",
               cost: Number(activity?.cost) || 0,
             }))
           : [],
@@ -262,7 +292,11 @@ const normalizeSavedTrip = (
 
   return {
     id,
-    trip,
+    trip: {
+      ...trip,
+      destinationState:
+        trip.destinationState || getDestinationStates(days),
+    },
     days: days.length ? days : createDefaultDays(),
     expenses,
     updatedAt,
@@ -297,6 +331,43 @@ export function TripProvider({
   const [isLoadingTrip, setIsLoadingTrip] = useState(true);
   const [saveStatus, setSaveStatus] = useState("");
 
+  // Keep an immediately accessible copy of the latest trip data.
+  // This prevents saving outdated React state.
+  const currentTripRef = useRef<CurrentTripData>({
+    trip: DEFAULT_TRIP,
+    days: createDefaultDays(),
+    expenses: [],
+    activeTripId: null,
+  });
+
+  const userIdRef = useRef<string | null>(null);
+
+  const isActiveTripExplicitRef = useRef(false);
+
+  // Queue destination additions so rapid clicks cannot overwrite
+  // one another with outdated trip data.
+  const destinationQueueRef = useRef<Promise<boolean>>(
+    Promise.resolve(true)
+  );
+
+  const commitCurrentTrip = (updates: Partial<CurrentTripData>) => {
+    const next = {
+      ...currentTripRef.current,
+      ...updates,
+    };
+
+    currentTripRef.current = next;
+
+    setTrip(next.trip);
+    setDays(next.days);
+    setExpenses(next.expenses);
+    setActiveTripId(next.activeTripId);
+  };
+
+  const setExplicitTrip = (value: boolean) => {
+    isActiveTripExplicitRef.current = value;
+  };
+
   // ========================================
   // LOAD SAVED TRIPS
   // ========================================
@@ -315,6 +386,7 @@ export function TripProvider({
 
         if (!mounted) return;
 
+        userIdRef.current = currentUser.uid;
         setUserId(currentUser.uid);
 
         const tripsRef = collection(
@@ -349,18 +421,29 @@ export function TripProvider({
         if (loadedTrips.length > 0) {
           const latestTrip = loadedTrips[0];
 
-          setTrip(latestTrip.trip);
-          setDays(latestTrip.days);
-          setExpenses(latestTrip.expenses);
-          setActiveTripId(latestTrip.id);
+          commitCurrentTrip({
+            trip: latestTrip.trip,
+            days: latestTrip.days,
+            expenses: latestTrip.expenses,
+            activeTripId: latestTrip.id,
+          });
+
+          // The latest saved trip is displayed, but is not
+          // automatically treated as the trip being edited.
+          setExplicitTrip(false);
         } else {
-          setTrip(DEFAULT_TRIP);
-          setDays(createDefaultDays());
-          setExpenses([]);
-          setActiveTripId(null);
+          commitCurrentTrip({
+            trip: { ...DEFAULT_TRIP },
+            days: createDefaultDays(),
+            expenses: [],
+            activeTripId: null,
+          });
+
+          setExplicitTrip(false);
         }
       } catch (error) {
         console.error("Error loading saved trips:", error);
+
         if (mounted) {
           setSaveStatus("Unable to load your saved trips.");
         }
@@ -381,22 +464,44 @@ export function TripProvider({
   // ADD DESTINATION
   // ========================================
 
-  const addDestination = (destination: {
-    id: string;
-    name: string;
-    state: string;
-    description?: string;
-    imageUrl?: string;
-    cost?: number;
-  }) => {
-    setDays((currentDays) => {
-      const alreadyAdded = currentDays.some((day) =>
+  const addDestination = (
+    destination: DestinationInput
+  ): Promise<boolean> => {
+    const task = destinationQueueRef.current.then(async () => {
+      if (isLoadingTrip || !userIdRef.current) {
+        setSaveStatus("Please wait while your trips load.");
+        return false;
+      }
+
+      const current = currentTripRef.current;
+
+      // Decide whether this is a new trip BEFORE checking
+      // whether the destination already exists.
+      const shouldStartFresh = !isActiveTripExplicitRef.current;
+
+      const baseTrip = shouldStartFresh
+        ? { ...DEFAULT_TRIP }
+        : { ...current.trip };
+
+      const baseDays = shouldStartFresh
+        ? createDefaultDays()
+        : current.days;
+
+      const baseExpenses = shouldStartFresh
+        ? []
+        : current.expenses;
+
+      // Only check for duplicates inside the trip we are adding to.
+      const alreadyAdded = baseDays.some((day) =>
         day.activities.some(
           (activity) => activity.destinationId === destination.id
         )
       );
 
-      if (alreadyAdded) return currentDays;
+      if (alreadyAdded) {
+        setSaveStatus("This destination is already in your trip.");
+        return true;
+      }
 
       const newActivity: TripActivity = {
         id: createId(),
@@ -410,68 +515,168 @@ export function TripProvider({
         cost: Number(destination.cost) || 0,
       };
 
-      const updatedDays = [...currentDays];
+      const nextDays = [...baseDays];
 
-      if (updatedDays.length === 0) {
-        updatedDays.push({
+      if (nextDays.length === 0) {
+        nextDays.push({
           id: createId(),
           title: "Day 1",
           activities: [newActivity],
         });
       } else {
-        updatedDays[0] = {
-          ...updatedDays[0],
-          activities: [...updatedDays[0].activities, newActivity].sort(
-            (a, b) => a.time.localeCompare(b.time)
-          ),
+        nextDays[0] = {
+          ...nextDays[0],
+          activities: [
+            ...nextDays[0].activities,
+            newActivity,
+          ].sort((a, b) => a.time.localeCompare(b.time)),
         };
       }
 
-      return updatedDays;
+      const nextTrip: TripDetails = {
+        ...baseTrip,
+        destinationState: getDestinationStates(nextDays),
+      };
+
+      const user = userIdRef.current;
+
+      const tripId =
+        shouldStartFresh || !current.activeTripId
+          ? doc(collection(db, "users", user, "trips")).id
+          : current.activeTripId;
+
+      const updatedAt = new Date().toISOString();
+
+      const tripToSave: SavedTrip = {
+        id: tripId,
+        trip: nextTrip,
+        days: nextDays,
+        expenses: baseExpenses,
+        updatedAt,
+      };
+
+      // Update the current trip immediately.
+      commitCurrentTrip({
+        trip: nextTrip,
+        days: nextDays,
+        expenses: baseExpenses,
+        activeTripId: tripId,
+      });
+
+      setExplicitTrip(true);
+
+      // Persist the complete trip, including every destination.
+      try {
+        const tripRef = doc(
+          db,
+          "users",
+          user,
+          "trips",
+          tripId
+        );
+
+        await setDoc(tripRef, {
+          trip: tripToSave.trip,
+          days: tripToSave.days,
+          expenses: tripToSave.expenses,
+          updatedAt,
+        });
+
+        setSavedTrips((currentTrips) => {
+          const withoutCurrent = currentTrips.filter(
+            (saved) => saved.id !== tripId
+          );
+
+          return [tripToSave, ...withoutCurrent];
+        });
+
+        setSaveStatus(
+          `${destination.name} has been added to your trip.`
+        );
+
+        return true;
+      } catch (error) {
+        console.error("Error saving selected destination:", error);
+
+        setSaveStatus(
+          "Destination added, but could not be saved. Please try again."
+        );
+
+        return false;
+      }
     });
 
-    setTrip((current) => ({
-      ...current,
-      destinationState: current.destinationState || destination.state,
-    }));
+    destinationQueueRef.current = task.catch(() => false);
+
+    return task;
   };
 
   // ========================================
   // ADD ACTIVITY
   // ========================================
 
-  const addActivity = (dayId: string, activity: TripActivity) => {
-    setDays((currentDays) =>
-      currentDays.map((day) =>
-        day.id === dayId
-          ? {
-              ...day,
-              activities: [...day.activities, activity].sort((a, b) =>
-                a.time.localeCompare(b.time)
-              ),
-            }
-          : day
-      )
+  const addActivity = (
+    dayId: string,
+    activity: TripActivity
+  ) => {
+    const current = currentTripRef.current;
+
+    const nextDays = current.days.map((day) =>
+      day.id === dayId
+        ? {
+            ...day,
+            activities: [...day.activities, activity].sort(
+              (a, b) => a.time.localeCompare(b.time)
+            ),
+          }
+        : day
     );
+
+    const nextTrip = {
+      ...current.trip,
+      destinationState: getDestinationStates(nextDays),
+    };
+
+    commitCurrentTrip({
+      days: nextDays,
+      trip: nextTrip,
+    });
+
+    setExplicitTrip(true);
   };
 
   // ========================================
   // REMOVE ACTIVITY
   // ========================================
 
-  const removeActivity = (dayId: string, activityId: string) => {
-    setDays((currentDays) =>
-      currentDays.map((day) =>
-        day.id === dayId
-          ? {
-              ...day,
-              activities: day.activities.filter(
-                (activity) => activity.id !== activityId
-              ),
-            }
-          : day
-      )
+  const removeActivity = (
+    dayId: string,
+    activityId: string
+  ) => {
+    const current = currentTripRef.current;
+
+    const nextDays = current.days.map((day) =>
+      day.id === dayId
+        ? {
+            ...day,
+            activities: day.activities.filter(
+              (activity) => activity.id !== activityId
+            ),
+          }
+        : day
     );
+
+    const nextTrip = {
+      ...current.trip,
+      destinationState: getDestinationStates(nextDays),
+    };
+
+    commitCurrentTrip({
+      days: nextDays,
+      trip: nextTrip,
+    });
+
+    setExplicitTrip(true);
   };
 
   // ========================================
@@ -479,14 +684,19 @@ export function TripProvider({
   // ========================================
 
   const addDay = () => {
-    setDays((currentDays) => [
-      ...currentDays,
+    const current = currentTripRef.current;
+
+    const nextDays = [
+      ...current.days,
       {
         id: createId(),
-        title: `Day ${currentDays.length + 1}`,
+        title: `Day ${current.days.length + 1}`,
         activities: [],
       },
-    ]);
+    ];
+
+    commitCurrentTrip({ days: nextDays });
+    setExplicitTrip(true);
   };
 
   // ========================================
@@ -494,10 +704,16 @@ export function TripProvider({
   // ========================================
 
   const updateTrip = (details: Partial<TripDetails>) => {
-    setTrip((current) => ({
-      ...current,
-      ...details,
-    }));
+    const current = currentTripRef.current;
+
+    commitCurrentTrip({
+      trip: {
+        ...current.trip,
+        ...details,
+      },
+    });
+
+    setExplicitTrip(true);
   };
 
   // ========================================
@@ -505,26 +721,42 @@ export function TripProvider({
   // ========================================
 
   const addExpense = (expense: TripExpense) => {
-    setExpenses((current) => [...current, expense]);
+    const current = currentTripRef.current;
+
+    commitCurrentTrip({
+      expenses: [...current.expenses, expense],
+    });
+
+    setExplicitTrip(true);
   };
 
   const updateExpense = (
     expenseId: string,
     updates: Partial<TripExpense>
   ) => {
-    setExpenses((current) =>
-      current.map((expense) =>
+    const current = currentTripRef.current;
+
+    commitCurrentTrip({
+      expenses: current.expenses.map((expense) =>
         expense.id === expenseId
           ? { ...expense, ...updates }
           : expense
-      )
-    );
+      ),
+    });
+
+    setExplicitTrip(true);
   };
 
   const removeExpense = (expenseId: string) => {
-    setExpenses((current) =>
-      current.filter((expense) => expense.id !== expenseId)
-    );
+    const current = currentTripRef.current;
+
+    commitCurrentTrip({
+      expenses: current.expenses.filter(
+        (expense) => expense.id !== expenseId
+      ),
+    });
+
+    setExplicitTrip(true);
   };
 
   // ========================================
@@ -532,7 +764,9 @@ export function TripProvider({
   // ========================================
 
   const saveTrip = async (): Promise<boolean> => {
-    if (!userId) {
+    const user = userIdRef.current;
+
+    if (!user) {
       setSaveStatus("Please wait while your trip storage loads.");
       return false;
     }
@@ -540,24 +774,35 @@ export function TripProvider({
     try {
       setSaveStatus("Saving your trip...");
 
-      const tripId = activeTripId ?? doc(
-        collection(db, "users", userId, "trips")
-      ).id;
+      // Read the latest data, not an old React render.
+      const current = currentTripRef.current;
+
+      const tripId =
+        current.activeTripId ??
+        doc(collection(db, "users", user, "trips")).id;
 
       const updatedAt = new Date().toISOString();
 
       const tripToSave: SavedTrip = {
         id: tripId,
-        trip: { ...trip },
-        days: [...days],
-        expenses: [...expenses],
+        trip: {
+          ...current.trip,
+          destinationState:
+            current.trip.destinationState ||
+            getDestinationStates(current.days),
+        },
+        days: current.days.map((day) => ({
+          ...day,
+          activities: [...day.activities],
+        })),
+        expenses: [...current.expenses],
         updatedAt,
       };
 
       const tripRef = doc(
         db,
         "users",
-        userId,
+        user,
         "trips",
         tripId
       );
@@ -569,10 +814,17 @@ export function TripProvider({
         updatedAt,
       });
 
-      setActiveTripId(tripId);
+      commitCurrentTrip({
+        trip: tripToSave.trip,
+        days: tripToSave.days,
+        expenses: tripToSave.expenses,
+        activeTripId: tripId,
+      });
 
-      setSavedTrips((current) => {
-        const withoutCurrent = current.filter(
+      setExplicitTrip(true);
+
+      setSavedTrips((currentTrips) => {
+        const withoutCurrent = currentTrips.filter(
           (saved) => saved.id !== tripId
         );
 
@@ -580,10 +832,13 @@ export function TripProvider({
       });
 
       setSaveStatus("Your trip has been saved successfully!");
+
       return true;
     } catch (error) {
       console.error("Error saving trip:", error);
+
       setSaveStatus("Unable to save your trip. Please try again.");
+
       return false;
     }
   };
@@ -605,10 +860,15 @@ export function TripProvider({
     setIsLoadingTrip(true);
 
     try {
-      setTrip(selectedTrip.trip);
-      setDays(selectedTrip.days);
-      setExpenses(selectedTrip.expenses);
-      setActiveTripId(selectedTrip.id);
+      commitCurrentTrip({
+        trip: selectedTrip.trip,
+        days: selectedTrip.days,
+        expenses: selectedTrip.expenses,
+        activeTripId: selectedTrip.id,
+      });
+
+      setExplicitTrip(true);
+
       setSaveStatus(`Now editing: ${selectedTrip.trip.tripName}`);
     } catch (error) {
       console.error("Error opening saved trip:", error);
@@ -623,10 +883,15 @@ export function TripProvider({
   // ========================================
 
   const createNewTrip = () => {
-    setTrip({ ...DEFAULT_TRIP });
-    setDays(createDefaultDays());
-    setExpenses([]);
-    setActiveTripId(null);
+    commitCurrentTrip({
+      trip: { ...DEFAULT_TRIP },
+      days: createDefaultDays(),
+      expenses: [],
+      activeTripId: null,
+    });
+
+    setExplicitTrip(true);
+
     setSaveStatus("New trip started. Save it when you're ready.");
   };
 
@@ -637,29 +902,38 @@ export function TripProvider({
   const deleteSavedTrip = async (
     tripId: string
   ): Promise<boolean> => {
-    if (!userId) return false;
+    const user = userIdRef.current;
+
+    if (!user) return false;
 
     try {
       await deleteDoc(
-        doc(db, "users", userId, "trips", tripId)
+        doc(db, "users", user, "trips", tripId)
       );
 
-      setSavedTrips((current) =>
-        current.filter((saved) => saved.id !== tripId)
+      setSavedTrips((currentTrips) =>
+        currentTrips.filter((saved) => saved.id !== tripId)
       );
 
-      if (activeTripId === tripId) {
-        setTrip({ ...DEFAULT_TRIP });
-        setDays(createDefaultDays());
-        setExpenses([]);
-        setActiveTripId(null);
+      if (currentTripRef.current.activeTripId === tripId) {
+        commitCurrentTrip({
+          trip: { ...DEFAULT_TRIP },
+          days: createDefaultDays(),
+          expenses: [],
+          activeTripId: null,
+        });
+
+        setExplicitTrip(false);
+
         setSaveStatus("Trip deleted. You can start a new trip.");
       }
 
       return true;
     } catch (error) {
-      console.error("Error deleting saved trip:", error);
+      console.error("Error deleting trip:", error);
+
       setSaveStatus("Unable to delete this trip. Please try again.");
+
       return false;
     }
   };

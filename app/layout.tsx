@@ -1,8 +1,10 @@
 
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Navbar from "./components/Navbar";
+import AuthGuard from "./components/AuthGuard";
 import { TripProvider } from "./context/TripContext";
 
 const geistSans = Geist({
@@ -21,7 +23,11 @@ export const metadata: Metadata = {
     "Discover beautiful destinations in Nigeria and plan your next trip with ease.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
     <html
       lang="en"
@@ -30,7 +36,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full flex flex-col">
         <TripProvider>
           <Navbar />
-          {children}
+          <Suspense fallback={null}>
+            <AuthGuard>{children}</AuthGuard>
+          </Suspense>
         </TripProvider>
       </body>
     </html>

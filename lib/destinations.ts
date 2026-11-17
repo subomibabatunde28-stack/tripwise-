@@ -33,9 +33,15 @@ export interface Destination {
   // Existing estimated destination cost
   estimatedCost: number;
 
-  // New recommendation information
-  vibes?: DestinationVibe[];
+  // Separate estimated travel costs
+  estimatedTransportCost?: number;
+  estimatedAccommodationCost?: number;
+  estimatedFoodCost?: number;
+  estimatedActivityCost?: number;
+  estimatedOtherCost?: number;
 
+  // Recommendation information
+  vibes?: DestinationVibe[];
   bestTimeToVisit?: string;
 }
 

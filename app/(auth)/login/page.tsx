@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -23,8 +23,14 @@ export default function LoginPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const attemptedLogin = useRef("");
+  const loginInProgress = useRef(false);
+
+  async function authenticate() {
+    if (loginInProgress.current) return;
+
+    loginInProgress.current = true;
+    attemptedLogin.current = `${email.trim()}|${password}`;
 
     setLoading(true);
     setError("");
@@ -36,7 +42,7 @@ export default function LoginPage() {
 
         if (currentUser?.isAnonymous) {
           const credential = EmailAuthProvider.credential(
-            email,
+            email.trim(),
             password
           );
 
@@ -44,14 +50,14 @@ export default function LoginPage() {
         } else {
           await createUserWithEmailAndPassword(
             auth,
-            email,
+            email.trim(),
             password
           );
         }
       } else {
         await signInWithEmailAndPassword(
           auth,
-          email,
+          email.trim(),
           password
         );
       }
@@ -64,26 +70,69 @@ export default function LoginPage() {
         case "auth/email-already-in-use":
           setError("This email already has an account. Please log in.");
           break;
+
         case "auth/invalid-email":
           setError("Please enter a valid email address.");
           break;
+
         case "auth/weak-password":
           setError("Your password must contain at least 6 characters.");
           break;
+
         case "auth/invalid-credential":
         case "auth/wrong-password":
         case "auth/user-not-found":
           setError("Incorrect email or password.");
           break;
+
         case "auth/credential-already-in-use":
           setError("This email already belongs to another account.");
           break;
+
+        case "auth/too-many-requests":
+          setError("Too many attempts. Please wait a moment and try again.");
+          break;
+
         default:
           setError("Something went wrong. Please try again.");
       }
     } finally {
+      loginInProgress.current = false;
       setLoading(false);
     }
+  }
+
+  // Automatically log in after the user stops typing.
+  useEffect(() => {
+    if (isSignUp || loading) return;
+
+    const cleanEmail = email.trim();
+    const loginKey = `${cleanEmail}|${password}`;
+
+    if (
+      !cleanEmail ||
+      !cleanEmail.includes("@") ||
+      password.length < 6 ||
+      attemptedLogin.current === loginKey
+    ) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (!loginInProgress.current) {
+        authenticate();
+      }
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [email, password, isSignUp, loading]);
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    if (loading) return;
+
+    await authenticate();
   };
 
   const handleForgotPassword = async () => {
@@ -96,7 +145,7 @@ export default function LoginPage() {
     }
 
     try {
-      await sendPasswordResetEmail(auth, email);
+      await sendPasswordResetEmail(auth, email.trim());
       setMessage("Password reset instructions have been sent to your email.");
     } catch {
       setError("Unable to send reset email. Please check your email address.");
@@ -137,7 +186,12 @@ export default function LoginPage() {
               type="email"
               required
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              disabled={loading}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                attemptedLogin.current = "";
+                setError("");
+              }}
               placeholder="Enter your email"
               className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-800 outline-none focus:ring-2 focus:ring-[#16834A] focus:border-transparent"
             />
@@ -154,7 +208,12 @@ export default function LoginPage() {
                 required
                 minLength={6}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                disabled={loading}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  attemptedLogin.current = "";
+                  setError("");
+                }}
                 placeholder="Enter your password"
                 className="w-full border border-gray-300 rounded-lg px-4 py-3 pr-16 text-gray-800 outline-none focus:ring-2 focus:ring-[#16834A] focus:border-transparent"
               />
@@ -193,6 +252,12 @@ export default function LoginPage() {
             </p>
           )}
 
+          {loading && (
+            <p className="text-sm text-green-700 text-center">
+              Checking your details...
+            </p>
+          )}
+
           <button
             type="submit"
             disabled={loading}
@@ -217,6 +282,7 @@ export default function LoginPage() {
               setIsSignUp(!isSignUp);
               setError("");
               setMessage("");
+              attemptedLogin.current = "";
             }}
             className="text-[#16834A] font-bold hover:underline"
           >
