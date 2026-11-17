@@ -35,7 +35,10 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <TripProvider>
-          <Navbar />
+          <Suspense fallback={null}>
+            <Navbar />
+          </Suspense>
+
           <Suspense fallback={null}>
             <AuthGuard>{children}</AuthGuard>
           </Suspense>
