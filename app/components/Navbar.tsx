@@ -11,7 +11,6 @@ const navLinks = [
   { name: "Destinations", href: "/destinations" },
   { name: "Recommendations", href: "/recommendations" },
   { name: "My Trips", href: "/my-trips" },
-  
 ];
 
 export default function Navbar() {
@@ -35,9 +34,12 @@ export default function Navbar() {
     }
   }
 
+  const isLoggedIn = user !== null && !user.isAnonymous;
+
   return (
     <nav className="relative z-50 border-b border-gray-200 bg-white shadow-sm">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+
         <Link href="/" className="text-2xl font-bold text-green-700">
           TripWise
         </Link>
@@ -50,6 +52,7 @@ export default function Navbar() {
           ☰
         </button>
 
+        {/* Desktop Navigation */}
         <div className="hidden items-center gap-6 md:flex">
           {navLinks.map((link) => (
             <Link
@@ -60,9 +63,26 @@ export default function Navbar() {
               {link.name}
             </Link>
           ))}
-     </div>
+
+          {isLoggedIn ? (
+            <button
+              onClick={handleLogout}
+              className="text-sm font-semibold text-green-700 transition hover:text-green-900"
+            >
+              Log Out
+            </button>
+          ) : (
+            <Link
+              href="/login"
+              className="rounded-lg bg-green-700 px-5 py-2 text-sm font-semibold text-white transition hover:bg-green-800"
+            >
+              Log In
+            </Link>
+          )}
+        </div>
       </div>
 
+      {/* Mobile Navigation */}
       {menuOpen && (
         <div className="flex flex-col gap-4 border-t border-gray-200 bg-white px-6 py-5 md:hidden">
           {navLinks.map((link) => (
@@ -76,8 +96,22 @@ export default function Navbar() {
             </Link>
           ))}
 
-          
-          
+          {isLoggedIn ? (
+            <button
+              onClick={handleLogout}
+              className="text-left font-semibold text-green-700"
+            >
+              Log Out
+            </button>
+          ) : (
+            <Link
+              href="/login"
+              onClick={() => setMenuOpen(false)}
+              className="font-semibold text-green-700"
+            >
+              Log In
+            </Link>
+          )}
         </div>
       )}
     </nav>
