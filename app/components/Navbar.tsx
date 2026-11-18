@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { redirect, usePathname } from "next/navigation";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 
@@ -43,6 +43,8 @@ export default function Navbar() {
       await signOut(auth);
       setProfileOpen(false);
       setMenuOpen(false);
+
+      redirect('/login')
     } catch (error) {
       console.error("Logout error:", error);
     }
